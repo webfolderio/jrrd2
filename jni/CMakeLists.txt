@@ -50,4 +50,4 @@ ELSEIF(WIN32)
 	SET_TARGET_PROPERTIES(jrrd2 PROPERTIES PREFIX "" SUFFIX ".dll")
 ENDIF(APPLE)
 
-target_link_libraries(jrrd2 rrd)
+target_link_libraries(jrrd2 librrd4j.a)
