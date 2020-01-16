@@ -1,0 +1,6 @@
+create librrd4j.a
+addlib librrd.a
+addlib libglib-2.0.a
+addlib libffi.a
+save
+end
