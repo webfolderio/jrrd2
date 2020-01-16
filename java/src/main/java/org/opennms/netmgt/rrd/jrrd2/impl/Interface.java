@@ -32,9 +32,18 @@
  *******************************************************************************/
 package org.opennms.netmgt.rrd.jrrd2.impl;
 
-import java.io.File;
-import java.util.LinkedHashSet;
-import java.util.Set;
+import static java.lang.System.getProperty;
+import static java.lang.System.load;
+import static java.nio.file.Files.copy;
+import static java.nio.file.Files.createDirectory;
+import static java.nio.file.Files.createFile;
+import static java.nio.file.Files.exists;
+import static java.nio.file.Paths.get;
+import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Path;
 
 import org.opennms.netmgt.rrd.jrrd2.api.FetchResults;
 import org.opennms.netmgt.rrd.jrrd2.api.JRrd2Exception;
@@ -44,13 +53,16 @@ import org.slf4j.LoggerFactory;
 /**
  * A native interface to librrd.
  *
- * Use org.opennms.netmgt.rrd.jrrd2.impl.JRrd2 instead of making
- * calls directly to this interface.
+ * Use org.opennms.netmgt.rrd.jrrd2.impl.JRrd2 instead of making calls directly
+ * to this interface.
  *
  * @author jwhite
  * @version 2.0.0
  */
 public final class Interface {
+
+    // temporary directory location
+    private static final Path tmpdir = get(getProperty("java.io.tmpdir")).toAbsolutePath();
 
     private static final Logger LOG = LoggerFactory.getLogger(Interface.class);
 
@@ -60,81 +72,45 @@ public final class Interface {
 
     private static boolean m_loaded = false;
 
+    private static final String version = "2.0.5";
+
     protected static native void rrd_get_context();
 
-    protected static native void rrd_create_r(String filename, long pdp_step, long last_up, String[] argv) throws JRrd2Exception;
+    protected static native void rrd_create_r(String filename, long pdp_step, long last_up, String[] argv)
+            throws JRrd2Exception;
 
     protected static native void rrd_update_r(String filename, String template, String[] argv) throws JRrd2Exception;
 
-    protected static native FetchResults rrd_fetch_r(String filename, String cf, long start, long end, long step) throws JRrd2Exception;
+    protected static native FetchResults rrd_fetch_r(String filename, String cf, long start, long end, long step)
+            throws JRrd2Exception;
 
     protected static synchronized native FetchResults rrd_xport(String[] argv) throws JRrd2Exception;
 
     /**
      * Load the jrrd library and create the singleton instance of the interface.
      * 
-     * @throws SecurityException
-     *             if we don't have permission to load the library
-     * @throws UnsatisfiedLinkError
-     *             if the library doesn't exist
+     * @throws SecurityException    if we don't have permission to load the library
+     * @throws UnsatisfiedLinkError if the library doesn't exist
      */
-    public static synchronized void init() throws SecurityException, UnsatisfiedLinkError {
+    public static synchronized void init() {
         if (m_loaded) {
             return;
         }
-
-        final String jniPath = System.getProperty(PROPERTY_NAME);
-        try {
-            LOG.debug("System property '{}' set to '{}'. Attempting to load {} library from this location.", PROPERTY_NAME,  System.getProperty(PROPERTY_NAME), LIBRARY_NAME);
-            System.load(jniPath);
-        } catch (final Throwable t) {
-            LOG.debug("System property '{}' not set or failed loading. Attempting to find library.", PROPERTY_NAME, LIBRARY_NAME);
-            loadLibrary();
-        }
-        LOG.info("Successfully loaded {} library.", LIBRARY_NAME);
-    }
-
-    private static void loadLibrary() {
-        final Set<String> searchPaths = new LinkedHashSet<String>();
-
-        if (System.getProperty("java.library.path") != null) {
-            for (final String entry : System.getProperty("java.library.path").split(File.pathSeparator)) {
-                searchPaths.add(entry);
+        Path libFile;
+        ClassLoader cl = Interface.class.getClassLoader();
+        try (InputStream is = cl.getResourceAsStream("META-INF/libjrrd2.so")) {
+            libFile = tmpdir.resolve("jrrd2-" + version).resolve("libjrrd2.so");
+            if (!exists(libFile.getParent())) {
+                createDirectory(libFile.getParent());
             }
-        }
-
-        for (final String entry : new String[] {
-                "/usr/lib64/jni",
-                "/usr/lib64",
-                "/usr/local/lib64",
-                "/usr/lib/jni",
-                "/usr/lib",
-                "/usr/local/lib"
-        }) {
-            searchPaths.add(entry);
-        }
-
-        for (final String path : searchPaths) {
-            for (final String prefix : new String[] { "", "lib" }) {
-                for (final String suffix : new String[] { ".jnilib", ".dylib", ".so" }) {
-                    final File f = new File(path + File.separator + prefix + LIBRARY_NAME + suffix);
-                    if (f.exists()) {
-                        try {
-                            System.load(f.getCanonicalPath());
-                            return;
-                        } catch (final Throwable t) {
-                            LOG.trace("Failed to load {} from file {}", LIBRARY_NAME, f, t);
-                        }
-                    }
-                }
+            if (!exists(libFile)) {
+                createFile(libFile);
             }
+            copy(is, libFile, REPLACE_EXISTING);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
-        LOG.debug("Unable to locate '{}' in common paths.  Attempting System.loadLibrary() as a last resort.", LIBRARY_NAME);
-        System.loadLibrary(LIBRARY_NAME);
-    }
-
-    public static synchronized void reload() throws SecurityException, UnsatisfiedLinkError {
-        m_loaded = false;
-        init();
+        load(libFile.toString());
+        m_loaded = true;
     }
 }
